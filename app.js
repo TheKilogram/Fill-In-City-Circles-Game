@@ -39,8 +39,10 @@ let cities = CITY_DATA || [];
 const norm = (s) => s.normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().toLowerCase();
 const labelFor = (c) => `${c.name}, ${c.state}`;
 const keyFor = (c) => norm(labelFor(c));
+const rkeyFor = (c) => `${c.name}|${c.state}|${c.lat}|${c.lon}`;
 
 const cityByKey = new Map();
+const cityByRKey = new Map();
 const cityByName = new Map(); // norm(city name) -> array of cities (diff states)
 cities.forEach((c) => {
   const n = norm(c.name);
@@ -50,6 +52,8 @@ cities.forEach((c) => {
 cities.forEach((c) => {
   const key = keyFor(c);
   if (!cityByKey.has(key)) cityByKey.set(key, c);
+  const rkey = rkeyFor(c);
+  if (!cityByRKey.has(rkey)) cityByRKey.set(rkey, c);
 });
 
 // No datalist population — keep input free of suggestions for quiz mode
@@ -59,7 +63,7 @@ const circlesLayer = L.layerGroup().addTo(map);
 const dotsLayer = L.layerGroup().addTo(map);
 const dotByKey = new Map(); // rkey -> Leaflet marker
 
-let placedCircleCenters = []; // {lat, lon, radius}
+let placedCircleCenters = []; // {lat, lon, radius, guessedKey}
 let revealedCityKeys = new Set();
 
 // Coverage estimation grid over contiguous US (finer resolution, area-weighted, land-masked)
@@ -232,11 +236,12 @@ function placeCircleForCity(city, radiusM) {
   });
   circlesLayer.addLayer(circle);
 
-  placedCircleCenters.push({ lat: center[0], lon: center[1], radius: radiusM });
-  const guessedKey = `${city.name}|${city.state}|${city.lat}|${city.lon}`;
+  const guessedKey = rkeyFor(city);
+  placedCircleCenters.push({ lat: center[0], lon: center[1], radius: radiusM, guessedKey });
   revealCitiesInCircle(center, radiusM, guessedKey);
   markCoverage(center, radiusM);
   updateStats();
+  saveProgress();
 }
 
 // Lightweight Levenshtein distance (with early exit threshold)
@@ -374,6 +379,43 @@ resetBtn.addEventListener('click', () => {
   coveredWeight = 0;
   dotByKey.clear();
   updateStats();
+  try { localStorage.removeItem('uscf_progress_v1'); } catch (e) {}
 });
 
 updateStats();
+
+// Persistence: save/load progress in localStorage (per browser)
+function saveProgress() {
+  try {
+    const data = {
+      v: 1,
+      circles: placedCircleCenters.map((c) => ({ lat: c.lat, lon: c.lon, radius: c.radius, guessedKey: c.guessedKey })),
+    };
+    localStorage.setItem('uscf_progress_v1', JSON.stringify(data));
+  } catch (e) {
+    // ignore
+  }
+}
+
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem('uscf_progress_v1');
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.circles)) return;
+    data.circles.forEach((c) => {
+      let city = null;
+      if (c.guessedKey && cityByRKey.has(c.guessedKey)) city = cityByRKey.get(c.guessedKey);
+      if (!city) {
+        // Fallback: synthesize a city object at the center
+        city = { name: 'City', state: '', lat: c.lat, lon: c.lon };
+      }
+      placeCircleForCity(city, c.radius);
+    });
+  } catch (e) {
+    // ignore
+  }
+}
+
+// Load any existing progress after initializing layers
+loadProgress();
