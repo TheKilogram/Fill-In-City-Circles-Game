@@ -280,22 +280,17 @@ function parseCityAndState(k) {
 
 function findCityByInput(value) {
   const k = norm(value);
-  if (!k) return null;
+  if (!k) return [];
   // exact label
-  if (cityByKey.has(k)) return cityByKey.get(k);
-  // startsWith on label
-  for (const [ckey, c] of cityByKey.entries()) {
-    if (ckey.startsWith(k)) return c;
-  }
+  if (cityByKey.has(k)) return [cityByKey.get(k)];
   // Try city-name only exact
   const { cityPart, state } = parseCityAndState(k);
   if (cityByName.has(cityPart)) {
-    let candidates = cityByName.get(cityPart);
+    let candidates = cityByName.get(cityPart).slice();
     if (state) candidates = candidates.filter((c) => c.state.toUpperCase() === state);
     if (candidates.length) {
-      // choose highest pop if available
       candidates.sort((a, b) => (b.pop || 0) - (a.pop || 0));
-      return candidates[0];
+      return candidates;
     }
   }
   // Common expansions for abbreviations
@@ -307,50 +302,62 @@ function findCityByInput(value) {
   let expanded = cityPart;
   for (const [re, rep] of expansions) expanded = expanded.replace(re, rep);
   if (expanded !== cityPart && cityByName.has(expanded)) {
-    let candidates = cityByName.get(expanded);
+    let candidates = cityByName.get(expanded).slice();
     if (state) candidates = candidates.filter((c) => c.state.toUpperCase() === state);
     if (candidates.length) {
       candidates.sort((a, b) => (b.pop || 0) - (a.pop || 0));
-      return candidates[0];
+      return candidates;
     }
   }
-  // Fuzzy on city names: pick best distance under threshold
-  let best = null;
+  // As a fallback, allow startsWith on label (helps partials like "new yo")
+  for (const [ckey, c] of cityByKey.entries()) {
+    if (ckey.startsWith(k)) return [c];
+  }
+  // Fuzzy on city names: pick best nameKey under threshold; return all with that name
+  let bestNameKey = null;
+  let bestArr = null;
   let bestScore = Infinity;
   const base = expanded;
-  // Dynamic threshold by length
   const len = base.length;
   const thresh = len <= 6 ? 2 : len <= 10 ? 3 : 4;
   for (const [nameKey, arr] of cityByName.entries()) {
     const d = editDistance(base, nameKey, thresh);
     if (d <= thresh) {
-      // choose the best by distance then by population
       const top = arr.slice().sort((a, b) => (b.pop || 0) - (a.pop || 0))[0];
-      const penalized = d - Math.min((top.pop || 0) / 1e7, 0.1); // tiny preference for bigger cities
-      if (state && top.state.toUpperCase() !== state) continue;
+      const penalized = d - Math.min((top.pop || 0) / 1e7, 0.1);
+      if (state && !arr.some((c) => c.state.toUpperCase() === state)) continue;
       if (penalized < bestScore) {
         bestScore = penalized;
-        best = top;
+        bestNameKey = nameKey;
+        bestArr = arr;
       }
     }
   }
-  if (best) return best;
-  return null;
+  if (bestArr) {
+    let out = bestArr.slice();
+    if (state) out = out.filter((c) => c.state.toUpperCase() === state);
+    out.sort((a, b) => (b.pop || 0) - (a.pop || 0));
+    return out;
+  }
+  return [];
 }
 
 function handleSubmit() {
   const raw = cityInput.value.trim();
   if (!raw) return;
-  const city = findCityByInput(raw);
-  if (!city) {
+  const results = findCityByInput(raw);
+  if (!results || results.length === 0) {
     cityInput.classList.add('invalid');
     setTimeout(() => cityInput.classList.remove('invalid'), 600);
     return;
   }
   const radius = DIFFICULTY_RADII_M[diffSelect.value] || DIFFICULTY_RADII_M.medium;
-  placeCircleForCity(city, radius);
-  // Move view toward the new circle
-  map.flyTo([city.lat, city.lon], Math.max(6, map.getZoom()));
+  // Place for all matched cities; fly to the first
+  results.forEach((c, i) => {
+    placeCircleForCity(c, radius);
+  });
+  const first = results[0];
+  map.flyTo([first.lat, first.lon], Math.max(6, map.getZoom()));
   cityInput.value = '';
 }
 
