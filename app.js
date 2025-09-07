@@ -35,12 +35,18 @@ const statCoverage = document.getElementById('stat-coverage');
 // CITY_DATA is provided by data/us_cities_sample.js
 let cities = CITY_DATA || [];
 
-// Build quick-lookup map by normalized label and populate datalist for suggestions
+// Build quick-lookup maps for fast matching + fuzzy correction
 const norm = (s) => s.normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().toLowerCase();
 const labelFor = (c) => `${c.name}, ${c.state}`;
 const keyFor = (c) => norm(labelFor(c));
 
 const cityByKey = new Map();
+const cityByName = new Map(); // norm(city name) -> array of cities (diff states)
+cities.forEach((c) => {
+  const n = norm(c.name);
+  if (!cityByName.has(n)) cityByName.set(n, []);
+  cityByName.get(n).push(c);
+});
 cities.forEach((c) => {
   const key = keyFor(c);
   if (!cityByKey.has(key)) cityByKey.set(key, c);
@@ -233,13 +239,102 @@ function placeCircleForCity(city, radiusM) {
   updateStats();
 }
 
+// Lightweight Levenshtein distance (with early exit threshold)
+function editDistance(a, b, maxThresh = 4) {
+  const al = a.length, bl = b.length;
+  if (Math.abs(al - bl) > maxThresh) return maxThresh + 1;
+  const dp = new Array(bl + 1);
+  for (let j = 0; j <= bl; j++) dp[j] = j;
+  for (let i = 1; i <= al; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    let rowMin = dp[0];
+    const ca = a.charCodeAt(i - 1);
+    for (let j = 1; j <= bl; j++) {
+      const tmp = dp[j];
+      const cost = ca === b.charCodeAt(j - 1) ? 0 : 1;
+      dp[j] = Math.min(
+        dp[j] + 1,
+        dp[j - 1] + 1,
+        prev + cost
+      );
+      prev = tmp;
+      if (dp[j] < rowMin) rowMin = dp[j];
+    }
+    if (rowMin > maxThresh) return maxThresh + 1;
+  }
+  return dp[bl];
+}
+
+function parseCityAndState(k) {
+  // Try to split trailing 2-letter state
+  let cityPart = k;
+  let state = null;
+  const m = k.match(/^(.*?)[ ,]+([a-z]{2})$/i);
+  if (m) {
+    cityPart = m[1].trim();
+    state = m[2].toUpperCase();
+  }
+  return { cityPart, state };
+}
+
 function findCityByInput(value) {
   const k = norm(value);
+  if (!k) return null;
+  // exact label
   if (cityByKey.has(k)) return cityByKey.get(k);
-  // Try looser matching: match first city whose label starts with the input
+  // startsWith on label
   for (const [ckey, c] of cityByKey.entries()) {
     if (ckey.startsWith(k)) return c;
   }
+  // Try city-name only exact
+  const { cityPart, state } = parseCityAndState(k);
+  if (cityByName.has(cityPart)) {
+    let candidates = cityByName.get(cityPart);
+    if (state) candidates = candidates.filter((c) => c.state.toUpperCase() === state);
+    if (candidates.length) {
+      // choose highest pop if available
+      candidates.sort((a, b) => (b.pop || 0) - (a.pop || 0));
+      return candidates[0];
+    }
+  }
+  // Common expansions for abbreviations
+  const expansions = [
+    [/(^|\s)st\b/g, '$1saint'],
+    [/(^|\s)ft\b/g, '$1fort'],
+    [/(^|\s)mt\b/g, '$1mount'],
+  ];
+  let expanded = cityPart;
+  for (const [re, rep] of expansions) expanded = expanded.replace(re, rep);
+  if (expanded !== cityPart && cityByName.has(expanded)) {
+    let candidates = cityByName.get(expanded);
+    if (state) candidates = candidates.filter((c) => c.state.toUpperCase() === state);
+    if (candidates.length) {
+      candidates.sort((a, b) => (b.pop || 0) - (a.pop || 0));
+      return candidates[0];
+    }
+  }
+  // Fuzzy on city names: pick best distance under threshold
+  let best = null;
+  let bestScore = Infinity;
+  const base = expanded;
+  // Dynamic threshold by length
+  const len = base.length;
+  const thresh = len <= 6 ? 2 : len <= 10 ? 3 : 4;
+  for (const [nameKey, arr] of cityByName.entries()) {
+    const d = editDistance(base, nameKey, thresh);
+    if (d <= thresh) {
+      // choose the best by distance then by population
+      const top = arr.slice().sort((a, b) => (b.pop || 0) - (a.pop || 0))[0];
+      const penalized = d - Math.min((top.pop || 0) / 1e7, 0.1); // tiny preference for bigger cities
+      if (state && top.state.toUpperCase() !== state) continue;
+      if (penalized < bestScore) {
+        bestScore = penalized;
+        best = top;
+      }
+    }
+  }
+  if (best) return best;
   return null;
 }
 
