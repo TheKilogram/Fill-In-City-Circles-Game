@@ -22,6 +22,11 @@
           <option value="medium">Medium (180 km)</option>
           <option value="hard">Hard (100 km)</option>
         </select>
+        <label for="pop-cutoff">City cutoff:</label>
+        <select id="pop-cutoff" title="Minimum city population to reveal in circles">
+          <option value="50k" selected>≥ 50k</option>
+          <option value="30k">≥ 30k (more)</option>
+        </select>
         <input id="city-input" type="text" placeholder="Type a US city and press Enter" autocomplete="off" autocorrect="on" autocapitalize="none" spellcheck="true" />
         <button id="reset-btn" title="Clear saved progress and start over">Clear Progress</button>
       </div>
@@ -55,6 +60,7 @@
       crossorigin=""
     ></script>
     <script src="data/us_cities_50k.js"></script>
+    <script src="data/us_cities_30k.js"></script>
     <script src="data/us_land_poly.js"></script>
     <script src="app.js"></script>
   </body>

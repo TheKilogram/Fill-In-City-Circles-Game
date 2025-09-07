@@ -44,17 +44,25 @@ const rkeyFor = (c) => `${c.name}|${c.state}|${c.lat}|${c.lon}`;
 const cityByKey = new Map();
 const cityByRKey = new Map();
 const cityByName = new Map(); // norm(city name) -> array of cities (diff states)
-cities.forEach((c) => {
-  const n = norm(c.name);
-  if (!cityByName.has(n)) cityByName.set(n, []);
-  cityByName.get(n).push(c);
-});
-cities.forEach((c) => {
-  const key = keyFor(c);
-  if (!cityByKey.has(key)) cityByKey.set(key, c);
-  const rkey = rkeyFor(c);
-  if (!cityByRKey.has(rkey)) cityByRKey.set(rkey, c);
-});
+
+function rebuildCityIndices() {
+  cityByKey.clear();
+  cityByRKey.clear();
+  cityByName.clear();
+  cities.forEach((c) => {
+    const n = norm(c.name);
+    if (!cityByName.has(n)) cityByName.set(n, []);
+    cityByName.get(n).push(c);
+  });
+  cities.forEach((c) => {
+    const key = keyFor(c);
+    if (!cityByKey.has(key)) cityByKey.set(key, c);
+    const rkey = rkeyFor(c);
+    if (!cityByRKey.has(rkey)) cityByRKey.set(rkey, c);
+  });
+}
+
+rebuildCityIndices();
 
 // No datalist population — keep input free of suggestions for quiz mode
 
@@ -419,3 +427,34 @@ function loadProgress() {
 
 // Load any existing progress after initializing layers
 loadProgress();
+
+// Dataset switching (≥50k vs ≥30k)
+const popSelect = document.getElementById('pop-cutoff');
+function setDatasetByCutoff(val) {
+  let next = cities;
+  if (val === '30k' && typeof CITY_DATA_30K !== 'undefined') next = CITY_DATA_30K;
+  else if (typeof CITY_DATA !== 'undefined') next = CITY_DATA; // 50k default
+  cities = next;
+  rebuildCityIndices();
+  // Rebuild dots based on existing circles
+  dotsLayer.clearLayers();
+  revealedCityKeys = new Set();
+  dotByKey.clear();
+  placedCircleCenters.forEach((c) => {
+    const center = [c.lat, c.lon];
+    revealCitiesInCircle(center, c.radius, c.guessedKey);
+  });
+  updateStats();
+  try { localStorage.setItem('uscf_cutoff', val); } catch (e) {}
+}
+
+if (popSelect) {
+  // Initialize from saved or default
+  let pref = null;
+  try { pref = localStorage.getItem('uscf_cutoff'); } catch (e) {}
+  if (pref && (pref === '30k' || pref === '50k')) {
+    popSelect.value = pref;
+  }
+  setDatasetByCutoff(popSelect.value);
+  popSelect.addEventListener('change', () => setDatasetByCutoff(popSelect.value));
+}
