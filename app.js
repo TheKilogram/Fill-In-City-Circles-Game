@@ -1,0 +1,277 @@
+// Basic parameters
+const DIFFICULTY_RADII_M = {
+  mega: 2_000_000, // 2000 km — extremely easy
+  easy: 300_000,   // 300 km
+  medium: 180_000, // 180 km
+  hard: 100_000,   // 100 km
+};
+
+// Map init
+const map = L.map('map', {
+  worldCopyJump: true,
+});
+
+// Label-free basemap (Carto Light No Labels)
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+  subdomains: 'abcd',
+  maxZoom: 12,
+  minZoom: 3,
+  attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+}).addTo(map);
+
+// Start centered on the US
+map.setView([39.5, -98.35], 4);
+
+// UI elements
+const cityInput = document.getElementById('city-input');
+const diffSelect = document.getElementById('difficulty');
+const resetBtn = document.getElementById('reset-btn');
+
+const statCircles = document.getElementById('stat-circles');
+const statDots = document.getElementById('stat-dots');
+const statCoverage = document.getElementById('stat-coverage');
+
+// Datasets and indices
+// CITY_DATA is provided by data/us_cities_sample.js
+let cities = CITY_DATA || [];
+
+// Build quick-lookup map by normalized label and populate datalist for suggestions
+const norm = (s) => s.normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().toLowerCase();
+const labelFor = (c) => `${c.name}, ${c.state}`;
+const keyFor = (c) => norm(labelFor(c));
+
+const cityByKey = new Map();
+cities.forEach((c) => {
+  const key = keyFor(c);
+  if (!cityByKey.has(key)) cityByKey.set(key, c);
+});
+
+// No datalist population — keep input free of suggestions for quiz mode
+
+// Layers and state
+const circlesLayer = L.layerGroup().addTo(map);
+const dotsLayer = L.layerGroup().addTo(map);
+const dotByKey = new Map(); // rkey -> Leaflet marker
+
+let placedCircleCenters = []; // {lat, lon, radius}
+let revealedCityKeys = new Set();
+
+// Coverage estimation grid over contiguous US (finer resolution, area-weighted, land-masked)
+const GRID = buildGrid({
+  latMin: 24.0,
+  latMax: 49.5,
+  lonMin: -125.0,
+  lonMax: -66.0,
+  stepDeg: 0.25,
+});
+let coveredIdx = new Set(); // indices of GRID.points
+let coveredWeight = 0; // sum of weights of covered samples
+
+function buildGrid({ latMin, latMax, lonMin, lonMax, stepDeg }) {
+  const points = [];
+  const weights = [];
+  let totalWeight = 0;
+  const toRad = (d) => (d * Math.PI) / 180;
+
+  // Use land polygon mask if available
+  const haveMask = typeof US_LAND_POLY !== 'undefined' && US_LAND_POLY && US_LAND_POLY.coordinates;
+  const maskIndex = haveMask ? buildPolyIndex(US_LAND_POLY) : null;
+
+  for (let lat = latMin; lat <= latMax + 1e-9; lat += stepDeg) {
+    const w = Math.max(0, Math.cos(toRad(lat))); // area weighting ~ cos(latitude)
+    for (let lon = lonMin; lon <= lonMax + 1e-9; lon += stepDeg) {
+      if (!haveMask || pointInIndexedPolys([lon, lat], maskIndex)) {
+        points.push([lat, lon]);
+        weights.push(w);
+        totalWeight += w;
+      }
+    }
+  }
+  return { points, weights, totalWeight };
+}
+
+// Ray casting point-in-polygon for GeoJSON MultiPolygon
+function pointInRing(point, ring) {
+  const x = point[0], y = point[1];
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 0.0) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function pointInPolygon(point, polygon) {
+  // polygon: [outerRing, hole1, hole2, ...]
+  if (!pointInRing(point, polygon[0])) return false;
+  for (let k = 1; k < polygon.length; k++) {
+    if (pointInRing(point, polygon[k])) return false; // inside a hole
+  }
+  return true;
+}
+
+function buildPolyIndex(multi) {
+  const polys = multi.type === 'MultiPolygon' ? multi.coordinates : [multi.coordinates];
+  return polys.map((poly) => {
+    // poly: [ringOuter, hole1, ...]
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const ring of poly) {
+      for (const pt of ring) {
+        const x = pt[0], y = pt[1];
+        if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
+    return { rings: poly, bbox: [minX, minY, maxX, maxY] };
+  });
+}
+
+function pointInIndexedPolys(point, index) {
+  const x = point[0], y = point[1];
+  for (const poly of index) {
+    const [minX, minY, maxX, maxY] = poly.bbox;
+    if (x < minX || x > maxX || y < minY || y > maxY) continue;
+    if (pointInPolygon(point, poly.rings)) return true;
+  }
+  return false;
+}
+
+function updateStats() {
+  statCircles.textContent = `Circles: ${placedCircleCenters.length}`;
+  statDots.textContent = `Cities Revealed: ${revealedCityKeys.size}`;
+  const pct = GRID.totalWeight ? ((coveredWeight / GRID.totalWeight) * 100) : 0;
+  const pctText = pct.toFixed(1).replace(/\.0$/, '');
+  statCoverage.textContent = `Map Covered: ${pctText}%`;
+}
+
+function haversineMeters(a, b) {
+  // a,b are [lat, lon]
+  const R = 6371e3;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLon = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLon = Math.sin(dLon / 2);
+  const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
+  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return R * c;
+}
+
+function markCoverage(center, radiusM) {
+  let addedWeight = 0;
+  GRID.points.forEach((p, idx) => {
+    if (!coveredIdx.has(idx)) {
+      const d = haversineMeters(center, p);
+      if (d <= radiusM) {
+        coveredIdx.add(idx);
+        const w = GRID.weights[idx] || 0;
+        coveredWeight += w;
+        addedWeight += w;
+      }
+    }
+  });
+  return addedWeight;
+}
+
+function revealCitiesInCircle(center, radiusM, guessedKey) {
+  let newCount = 0;
+  for (const c of cities) {
+    const d = haversineMeters(center, [c.lat, c.lon]);
+    if (d <= radiusM) {
+      const rkey = `${c.name}|${c.state}|${c.lat}|${c.lon}`;
+      if (!revealedCityKeys.has(rkey)) {
+        revealedCityKeys.add(rkey);
+        newCount++;
+        const dot = L.circleMarker([c.lat, c.lon], {
+          radius: 3,
+          color: '#6ad1ff',
+          weight: 1,
+          fillColor: '#3fa4ff',
+          fillOpacity: 0.8,
+        });
+        if (guessedKey && rkey === guessedKey) {
+          dot.bindTooltip(`${c.name}, ${c.state}`, { permanent: true, direction: 'top', offset: [0, -4], className: 'city-label' });
+        }
+        dotsLayer.addLayer(dot);
+        dotByKey.set(rkey, dot);
+      } else if (guessedKey && rkey === guessedKey) {
+        const existing = dotByKey.get(rkey);
+        if (existing && !existing.getTooltip()) {
+          existing.bindTooltip(`${c.name}, ${c.state}`, { permanent: true, direction: 'top', offset: [0, -4], className: 'city-label' });
+        }
+      }
+    }
+  }
+  return newCount;
+}
+
+function placeCircleForCity(city, radiusM) {
+  const center = [city.lat, city.lon];
+  // Check duplicate circle at (almost) same center and radius
+  const dup = placedCircleCenters.some(
+    (c) => Math.abs(c.lat - center[0]) < 1e-6 && Math.abs(c.lon - center[1]) < 1e-6 && Math.abs(c.radius - radiusM) < 1e-6
+  );
+  if (dup) return;
+
+  const circle = L.circle(center, {
+    radius: radiusM,
+    color: '#ff8f6b',
+    weight: 2,
+    opacity: 0.9,
+    fillColor: '#ff6b6b',
+    fillOpacity: 0.15,
+  });
+  circlesLayer.addLayer(circle);
+
+  placedCircleCenters.push({ lat: center[0], lon: center[1], radius: radiusM });
+  const guessedKey = `${city.name}|${city.state}|${city.lat}|${city.lon}`;
+  revealCitiesInCircle(center, radiusM, guessedKey);
+  markCoverage(center, radiusM);
+  updateStats();
+}
+
+function findCityByInput(value) {
+  const k = norm(value);
+  if (cityByKey.has(k)) return cityByKey.get(k);
+  // Try looser matching: match first city whose label starts with the input
+  for (const [ckey, c] of cityByKey.entries()) {
+    if (ckey.startsWith(k)) return c;
+  }
+  return null;
+}
+
+function handleSubmit() {
+  const raw = cityInput.value.trim();
+  if (!raw) return;
+  const city = findCityByInput(raw);
+  if (!city) {
+    cityInput.classList.add('invalid');
+    setTimeout(() => cityInput.classList.remove('invalid'), 600);
+    return;
+  }
+  const radius = DIFFICULTY_RADII_M[diffSelect.value] || DIFFICULTY_RADII_M.medium;
+  placeCircleForCity(city, radius);
+  // Move view toward the new circle
+  map.flyTo([city.lat, city.lon], Math.max(6, map.getZoom()));
+  cityInput.value = '';
+}
+
+cityInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') handleSubmit();
+});
+
+resetBtn.addEventListener('click', () => {
+  circlesLayer.clearLayers();
+  dotsLayer.clearLayers();
+  placedCircleCenters = [];
+  revealedCityKeys = new Set();
+  coveredIdx = new Set();
+  coveredWeight = 0;
+  dotByKey.clear();
+  updateStats();
+});
+
+updateStats();

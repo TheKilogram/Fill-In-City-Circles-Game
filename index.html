@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>US City Fill — Map Quiz</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="topbar">
+      <div class="controls">
+        <label for="difficulty">Difficulty:</label>
+        <select id="difficulty">
+          <option value="mega">Mega Bubble (2000 km)</option>
+          <option value="easy" selected>Easy (300 km)</option>
+          <option value="medium">Medium (180 km)</option>
+          <option value="hard">Hard (100 km)</option>
+        </select>
+        <input id="city-input" type="text" placeholder="Type a US city and press Enter" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+        <button id="reset-btn" title="Clear circles and stats">Reset</button>
+      </div>
+      <div class="stats">
+        <span id="stat-circles">Circles: 0</span>
+        <span id="stat-dots">Cities Revealed: 0</span>
+        <span id="stat-coverage">Map Covered: 0%</span>
+      </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="help">
+      <h1>US City Fill — Map Quiz</h1>
+      <p>
+        Goal: Fill the map by naming US cities. Each valid city drops a circle centered on that city. Cities with population ≥ 50k that fall inside any circle appear as small dots. Choose a difficulty to change circle radius.
+      </p>
+      <ul>
+        <li>Start typing a city name (e.g., “Denver”) and press Enter.</li>
+        <li>Try to cover as much of the US as possible.</li>
+        <li>Reset clears everything to try again.</li>
+      </ul>
+      <p class="small">
+        Map tiles © OpenStreetMap contributors. Built with Leaflet. Dataset: US cities ≥ 50k population (SimpleMaps basic, processed locally).
+      </p>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="data/us_cities_50k.js"></script>
+    <script src="data/us_land_poly.js"></script>
+    <script src="app.js"></script>
+  </body>
+  </html>
