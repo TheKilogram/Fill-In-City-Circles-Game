@@ -294,6 +294,8 @@ function parseCityAndState(k) {
 function findCityByInput(value) {
   const k = norm(value);
   if (!k) return [];
+  // Guard against overly eager matches: require a minimum length
+  const MIN_AUTOCORRECT_LEN = 3; // don't auto-correct or partial-match on < 3 chars
   // exact label
   if (cityByKey.has(k)) return [cityByKey.get(k)];
   // Try city-name only exact
@@ -323,8 +325,11 @@ function findCityByInput(value) {
     }
   }
   // As a fallback, allow startsWith on label (helps partials like "new yo")
-  for (const [ckey, c] of cityByKey.entries()) {
-    if (ckey.startsWith(k)) return [c];
+  // But only if the user has typed enough characters to be intentional
+  if (k.length >= MIN_AUTOCORRECT_LEN) {
+    for (const [ckey, c] of cityByKey.entries()) {
+      if (ckey.startsWith(k)) return [c];
+    }
   }
   // Fuzzy on city names: pick best nameKey under threshold; return all with that name
   let bestNameKey = null;
@@ -332,7 +337,10 @@ function findCityByInput(value) {
   let bestScore = Infinity;
   const base = expanded;
   const len = base.length;
-  const thresh = len <= 6 ? 2 : len <= 10 ? 3 : 4;
+  // Require minimum length for fuzzy matching
+  if (len < MIN_AUTOCORRECT_LEN) return [];
+  // Dynamic threshold scaled by input length, capped to keep it strict
+  const thresh = Math.min(4, Math.max(1, Math.floor(len * 0.3)));
   for (const [nameKey, arr] of cityByName.entries()) {
     const d = editDistance(base, nameKey, thresh);
     if (d <= thresh) {
