@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>US City Fill — Map Quiz</title>
+    <title>City Fill - Map Quiz</title>
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -15,6 +15,11 @@
   <body>
     <div id="topbar">
       <div class="controls">
+        <label for="region">Region:</label>
+        <select id="region" title="Select region to play">
+          <option value="US" selected>United States</option>
+          <option value="EU">Europe</option>
+        </select>
         <label for="difficulty">Difficulty:</label>
         <select id="difficulty">
           <option value="mega">Mega Bubble (2000 km)</option>
@@ -24,10 +29,10 @@
         </select>
         <label for="pop-cutoff">City cutoff:</label>
         <select id="pop-cutoff" title="Minimum city population to reveal in circles">
-          <option value="50k" selected>≥ 50k</option>
-          <option value="30k">≥ 30k (more)</option>
+          <option value="50k" selected>&ge; 50k</option>
+          <option value="30k">&ge; 30k (more)</option>
         </select>
-        <input id="city-input" type="text" placeholder="Type a US city and press Enter" autocomplete="off" autocorrect="on" autocapitalize="none" spellcheck="true" />
+        <input id="city-input" type="text" placeholder="Type a city and press Enter" autocomplete="off" autocorrect="on" autocapitalize="none" spellcheck="true" />
         <button id="reset-btn" title="Clear saved progress and start over">Clear Progress</button>
       </div>
       <div class="stats">
@@ -40,17 +45,17 @@
     <div id="map"></div>
 
     <div id="help">
-      <h1>US City Fill — Map Quiz</h1>
+      <h1>City Fill - Map Quiz</h1>
       <p>
-        Goal: Fill the map by naming US cities. Each valid city drops a circle centered on that city. Cities with population ≥ 50k that fall inside any circle appear as small dots. Choose a difficulty to change circle radius.
+        Goal: Fill the map by naming cities in the selected region. Each valid city drops a circle centered on that city. Cities meeting the population cutoff that fall inside any circle appear as small dots. Choose a difficulty to change circle radius.
       </p>
       <ul>
-        <li>Start typing a city name (e.g., “Denver”) and press Enter.</li>
-        <li>Try to cover as much of the US as possible.</li>
+        <li>Start typing a city name (e.g., "Denver" or "Paris") and press Enter.</li>
+        <li>Try to cover as much of the selected region as possible.</li>
         <li>Reset clears everything to try again.</li>
       </ul>
       <p class="small">
-        Map tiles © OpenStreetMap contributors. Built with Leaflet. Dataset: US cities ≥ 50k population (SimpleMaps basic, processed locally).
+        Map tiles &copy; OpenStreetMap contributors. Built with Leaflet. Datasets are loaded per region.
       </p>
     </div>
 
@@ -59,9 +64,11 @@
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin=""
     ></script>
+    <!-- US defaults are preloaded; Europe data loads on demand in app.js -->
     <script src="data/us_cities_50k.js"></script>
     <script src="data/us_cities_30k.js"></script>
     <script src="data/us_land_poly.js"></script>
     <script src="app.js"></script>
   </body>
   </html>
+

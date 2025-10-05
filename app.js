@@ -26,14 +26,57 @@ map.setView([39.5, -98.35], 4);
 const cityInput = document.getElementById('city-input');
 const diffSelect = document.getElementById('difficulty');
 const resetBtn = document.getElementById('reset-btn');
+const regionSelect = document.getElementById('region');
+const popSelect = document.getElementById('pop-cutoff');
 
 const statCircles = document.getElementById('stat-circles');
 const statDots = document.getElementById('stat-dots');
 const statCoverage = document.getElementById('stat-coverage');
 
-// Datasets and indices
-// CITY_DATA is provided by data/us_cities_sample.js
-let cities = CITY_DATA || [];
+// Region config and datasets
+let ACTIVE_LAND_POLY = null; // MultiPolygon for current region mask
+let GRID = { points: [], weights: [], totalWeight: 0 };
+
+const REGIONS = {
+  US: {
+    id: 'US',
+    label: 'United States',
+    bounds: { latMin: 24.0, latMax: 49.5, lonMin: -125.0, lonMax: -66.0 },
+    center: [39.5, -98.35],
+    zoom: 4,
+    has50k: true,
+    dataset: async (cutoff) => {
+      if (cutoff === '30k' && typeof CITY_DATA_30K !== 'undefined') return CITY_DATA_30K;
+      if (typeof CITY_DATA !== 'undefined') return CITY_DATA;
+      return [];
+    },
+    loadMask: async () => {
+      return (typeof US_LAND_POLY !== 'undefined') ? US_LAND_POLY : null;
+    },
+    placeholder: 'Type a US city and press Enter',
+  },
+  EU: {
+    id: 'EU',
+    label: 'Europe',
+    bounds: { latMin: 34.0, latMax: 72.0, lonMin: -25.0, lonMax: 40.0 },
+    center: [54.0, 15.0],
+    zoom: 4,
+    has50k: false,
+    dataset: async (_cutoff) => {
+      // Load from configured URL or leave empty if none
+      const list = await ensureEuropeCitiesLoaded();
+      return Array.isArray(list) ? list : [];
+    },
+    loadMask: async () => {
+      return await buildEuropeLandMaskFromCountries();
+    },
+    placeholder: 'Type a European city and press Enter',
+  },
+};
+
+let currentRegion = 'US';
+// CITY_DATA defaults to US if present
+let cities = (typeof CITY_DATA !== 'undefined') ? CITY_DATA : [];
 
 // Build quick-lookup maps for fast matching + fuzzy correction
 const norm = (s) => s.normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().toLowerCase();
@@ -74,14 +117,17 @@ const dotByKey = new Map(); // rkey -> Leaflet marker
 let placedCircleCenters = []; // {lat, lon, radius, guessedKey}
 let revealedCityKeys = new Set();
 
-// Coverage estimation grid over contiguous US (finer resolution, area-weighted, land-masked)
-const GRID = buildGrid({
-  latMin: 24.0,
-  latMax: 49.5,
-  lonMin: -125.0,
-  lonMax: -66.0,
-  stepDeg: 0.25,
-});
+// Coverage estimation grid (rebuilt when region changes)
+function rebuildGridForRegion() {
+  const cfg = REGIONS[currentRegion];
+  GRID = buildGrid({
+    latMin: cfg.bounds.latMin,
+    latMax: cfg.bounds.latMax,
+    lonMin: cfg.bounds.lonMin,
+    lonMax: cfg.bounds.lonMax,
+    stepDeg: 0.25,
+  });
+}
 let coveredIdx = new Set(); // indices of GRID.points
 let coveredWeight = 0; // sum of weights of covered samples
 
@@ -92,8 +138,8 @@ function buildGrid({ latMin, latMax, lonMin, lonMax, stepDeg }) {
   const toRad = (d) => (d * Math.PI) / 180;
 
   // Use land polygon mask if available
-  const haveMask = typeof US_LAND_POLY !== 'undefined' && US_LAND_POLY && US_LAND_POLY.coordinates;
-  const maskIndex = haveMask ? buildPolyIndex(US_LAND_POLY) : null;
+  const haveMask = ACTIVE_LAND_POLY && ACTIVE_LAND_POLY.coordinates;
+  const maskIndex = haveMask ? buildPolyIndex(ACTIVE_LAND_POLY) : null;
 
   for (let lat = latMin; lat <= latMax + 1e-9; lat += stepDeg) {
     const w = Math.max(0, Math.cos(toRad(lat))); // area weighting ~ cos(latitude)
@@ -252,6 +298,100 @@ function placeCircleForCity(city, radiusM) {
   saveProgress();
 }
 
+// --- Region loading helpers --- (local file loader for EU)
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-dynamic="${src}"]`);
+    if (existing) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.dataset.dynamic = src;
+    s.onload = () => resolve();
+    s.onerror = (e) => reject(e);
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureEuropeCitiesLoaded() {
+  if (typeof EU_CITY_DATA_30K !== 'undefined' && Array.isArray(EU_CITY_DATA_30K)) return EU_CITY_DATA_30K;
+  // Prefer generated dataset if present
+  try { await loadScriptOnce('data/europe/eu_cities_30k.gen.js'); } catch (e) {}
+  if (typeof EU_CITY_DATA_30K !== 'undefined' && Array.isArray(EU_CITY_DATA_30K)) return EU_CITY_DATA_30K;
+  // Fallback to manual local file
+  await loadScriptOnce('data/europe/eu_cities_30k.js');
+  return (typeof EU_CITY_DATA_30K !== 'undefined') ? EU_CITY_DATA_30K : [];
+}
+
+async function buildEuropeLandMaskFromCountries() {
+  try {
+    const resp = await fetch('tmp_countries.geojson');
+    const data = await resp.json();
+    const include = new Set([
+      'Portugal','Spain','Andorra','Monaco','France','Belgium','Netherlands','Luxembourg','Germany','Switzerland','Austria','Liechtenstein','Italy','San Marino','Vatican','Malta','Slovenia','Croatia','Bosnia and Herzegovina','Serbia','Montenegro','Kosovo','Albania','North Macedonia','Greece','Bulgaria','Romania','Hungary','Slovakia','Czech Republic','Czechia','Poland','Lithuania','Latvia','Estonia','Denmark','Norway','Sweden','Finland','Iceland','Ireland','United Kingdom','Belarus','Ukraine','Moldova','Russia','Turkey'
+    ]);
+    const coords = [];
+    for (const f of data.features || []) {
+      const name = (f.properties && (f.properties.name || f.properties.ADMIN || f.properties.admin)) || '';
+      if (!include.has(name)) continue;
+      const g = f.geometry;
+      if (!g) continue;
+      if (g.type === 'Polygon') {
+        coords.push(g.coordinates);
+      } else if (g.type === 'MultiPolygon') {
+        for (const poly of g.coordinates) coords.push(poly);
+      }
+    }
+    return { type: 'MultiPolygon', coordinates: coords };
+  } catch (e) {
+    console.warn('Failed to load Europe land mask; coverage will include water.', e);
+    return null;
+  }
+}
+
+function storageKey(base) {
+  return `${base}_${currentRegion}`;
+}
+
+async function applyRegion(regionId, { keepView = false } = {}) {
+  currentRegion = regionId in REGIONS ? regionId : 'US';
+  const cfg = REGIONS[currentRegion];
+  try { localStorage.setItem('uscf_region', currentRegion); } catch (e) {}
+
+  // Load land mask and dataset for current cutoff
+  ACTIVE_LAND_POLY = await cfg.loadMask();
+
+  // Dataset by cutoff (normalize for EU)
+  let cutoff = popSelect ? popSelect.value : '50k';
+  if (!cfg.has50k && cutoff !== '30k') cutoff = '30k';
+  const nextCities = await cfg.dataset(cutoff);
+  cities = nextCities || [];
+  rebuildCityIndices();
+
+  // Reset layers/state for new region
+  circlesLayer.clearLayers();
+  dotsLayer.clearLayers();
+  placedCircleCenters = [];
+  revealedCityKeys = new Set();
+  dotByKey.clear();
+  coveredIdx = new Set();
+  coveredWeight = 0;
+
+  // Rebuild grid and update stats
+  rebuildGridForRegion();
+  updateStats();
+
+  // Update UI: center, placeholder, cutoff options
+  if (!keepView) map.setView(cfg.center, cfg.zoom);
+  if (cityInput) cityInput.placeholder = cfg.placeholder;
+  if (popSelect) {
+    const opt50 = Array.from(popSelect.options).find(o => o.value === '50k');
+    if (opt50) opt50.disabled = !cfg.has50k;
+    if (!cfg.has50k) popSelect.value = '30k';
+    try { localStorage.setItem(storageKey('uscf_cutoff'), popSelect.value); } catch (e) {}
+  }
+}
+
 // Lightweight Levenshtein distance (with early exit threshold)
 function editDistance(a, b, maxThresh = 4) {
   const al = a.length, bl = b.length;
@@ -395,10 +535,66 @@ resetBtn.addEventListener('click', () => {
   coveredWeight = 0;
   dotByKey.clear();
   updateStats();
-  try { localStorage.removeItem('uscf_progress_v1'); } catch (e) {}
+  try { localStorage.removeItem(storageKey('uscf_progress_v1')); } catch (e) {}
 });
 
 updateStats();
+
+// New dataset/cutoff + region bootstrap
+async function setDatasetByCutoff(val) {
+  const cfg = REGIONS[currentRegion];
+  let cutoff = val;
+  if (!cfg.has50k) cutoff = '30k';
+  const nextCities = await cfg.dataset(cutoff);
+  cities = nextCities || [];
+  rebuildCityIndices();
+  // Rebuild dots based on existing circles
+  dotsLayer.clearLayers();
+  revealedCityKeys = new Set();
+  dotByKey.clear();
+  placedCircleCenters.forEach((c) => {
+    const center = [c.lat, c.lon];
+    revealCitiesInCircle(center, c.radius, c.guessedKey);
+  });
+  updateStats();
+  try { localStorage.setItem(storageKey('uscf_cutoff'), cutoff); } catch (e) {}
+}
+
+async function initRegionAndCutoff() {
+  // Load region preference
+  let prefRegion = 'US';
+  try { const r = localStorage.getItem('uscf_region'); if (r && REGIONS[r]) prefRegion = r; } catch (e) {}
+  if (regionSelect) regionSelect.value = prefRegion;
+  await applyRegion(prefRegion, { keepView: false });
+
+  // Load cutoff preference per region
+  let prefCutoff = '50k';
+  try {
+    const saved = localStorage.getItem(storageKey('uscf_cutoff'));
+    if (saved && (saved === '30k' || saved === '50k')) prefCutoff = saved;
+  } catch (e) {}
+  if (!REGIONS[currentRegion].has50k) prefCutoff = '30k';
+  if (popSelect) popSelect.value = prefCutoff;
+  await setDatasetByCutoff(prefCutoff);
+
+  // Load any existing progress after datasets and grid ready
+  loadProgress();
+}
+
+if (regionSelect) {
+  regionSelect.addEventListener('change', async () => {
+    await applyRegion(regionSelect.value);
+  });
+}
+
+if (popSelect) {
+  popSelect.addEventListener('change', async () => {
+    await setDatasetByCutoff(popSelect.value);
+  });
+}
+
+// Boot
+initRegionAndCutoff();
 
 // Persistence: save/load progress in localStorage (per browser)
 function saveProgress() {
@@ -407,7 +603,7 @@ function saveProgress() {
       v: 1,
       circles: placedCircleCenters.map((c) => ({ lat: c.lat, lon: c.lon, radius: c.radius, guessedKey: c.guessedKey })),
     };
-    localStorage.setItem('uscf_progress_v1', JSON.stringify(data));
+    localStorage.setItem(storageKey('uscf_progress_v1'), JSON.stringify(data));
   } catch (e) {
     // ignore
   }
@@ -415,7 +611,7 @@ function saveProgress() {
 
 function loadProgress() {
   try {
-    const raw = localStorage.getItem('uscf_progress_v1');
+    const raw = localStorage.getItem(storageKey('uscf_progress_v1'));
     if (!raw) return;
     const data = JSON.parse(raw);
     if (!data || !Array.isArray(data.circles)) return;
@@ -433,12 +629,12 @@ function loadProgress() {
   }
 }
 
-// Load any existing progress after initializing layers
-loadProgress();
+// Load existing progress is handled in region init
+// (moved to initRegionAndCutoff())
 
 // Dataset switching (≥50k vs ≥30k)
-const popSelect = document.getElementById('pop-cutoff');
-function setDatasetByCutoff(val) {
+const popSelect_legacy = document.getElementById('pop-cutoff');
+function setDatasetByCutoff_legacy(val) {
   let next = cities;
   if (val === '30k' && typeof CITY_DATA_30K !== 'undefined') next = CITY_DATA_30K;
   else if (typeof CITY_DATA !== 'undefined') next = CITY_DATA; // 50k default
@@ -456,13 +652,7 @@ function setDatasetByCutoff(val) {
   try { localStorage.setItem('uscf_cutoff', val); } catch (e) {}
 }
 
-if (popSelect) {
-  // Initialize from saved or default
-  let pref = null;
-  try { pref = localStorage.getItem('uscf_cutoff'); } catch (e) {}
-  if (pref && (pref === '30k' || pref === '50k')) {
-    popSelect.value = pref;
-  }
-  setDatasetByCutoff(popSelect.value);
-  popSelect.addEventListener('change', () => setDatasetByCutoff(popSelect.value));
+if (false && popSelect_legacy) {
+  // Initialize from saved or default is handled by region boot
+  popSelect_legacy.addEventListener('change', () => setDatasetByCutoff_legacy(popSelect_legacy.value));
 }
