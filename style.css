@@ -205,6 +205,11 @@ html, body {
   #topbar label { display: none; }
   /* But when the settings menu is open, show labels for clarity */
   .menu-open #topbar label { display: inline-block; }
+  /* Always hide Difficulty label on mobile (even when menu open) */
+  #topbar label[for="difficulty"],
+  .menu-open #topbar label[for="difficulty"] {
+    display: none !important;
+  }
 }
 
 @media (max-width: 600px) {
