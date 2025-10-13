@@ -46,6 +46,20 @@ html, body {
   gap: 8px;
 }
 
+/* Hamburger button hidden on desktop */
+#topbar #menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  border: 1px solid #2c3559;
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 6px;
+  font-size: 18px;
+}
+
 #topbar label {
   color: var(--muted);
 }
@@ -148,6 +162,22 @@ html, body {
     column-gap: 8px;
     width: 100%;
   }
+  /* show hamburger on mobile */
+  #topbar #menu-btn {
+    display: inline-flex;
+  }
+  /* Hide settings group by default on mobile */
+  #topbar .settings {
+    display: none;
+    width: 100%;
+  }
+  /* When menu is open, show settings as a block row */
+  .menu-open #topbar .settings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+  }
   #topbar .stats {
     width: 100%;
     flex-wrap: wrap;
@@ -165,9 +195,9 @@ html, body {
     flex: 0 0 auto;
   }
   /* Hide labels to save space; titles still provide context */
-  #topbar label {
-    display: none;
-  }
+  #topbar label { display: none; }
+  /* But when the settings menu is open, show labels for clarity */
+  .menu-open #topbar label { display: inline-block; }
 }
 
 @media (max-width: 600px) {

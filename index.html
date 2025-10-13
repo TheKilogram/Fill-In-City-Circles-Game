@@ -15,22 +15,25 @@
   <body>
     <div id="topbar">
       <div class="controls">
-        <label for="region">Region:</label>
-        <select id="region" title="Select region to play">
-          <option value="US" selected>United States</option>
-          <option value="EU">Europe</option>
-        </select>
+        <button id="menu-btn" aria-label="Open settings" aria-expanded="false" aria-controls="settings-panel" title="Settings">☰</button>
+        <div id="settings-panel" class="settings">
+          <label for="region">Region:</label>
+          <select id="region" title="Select region to play">
+            <option value="US" selected>United States</option>
+            <option value="EU">Europe</option>
+          </select>
+          <label for="pop-cutoff">City cutoff:</label>
+          <select id="pop-cutoff" title="Minimum city population to reveal in circles">
+            <option value="50k">&ge; 50k</option>
+            <option value="30k" selected>&ge; 30k (more)</option>
+          </select>
+        </div>
         <label for="difficulty">Difficulty:</label>
         <select id="difficulty">
           <option value="mega">Mega Bubble (2000 km)</option>
           <option value="easy" selected>Easy (300 km)</option>
           <option value="medium">Medium (180 km)</option>
           <option value="hard">Hard (100 km)</option>
-        </select>
-        <label for="pop-cutoff">City cutoff:</label>
-        <select id="pop-cutoff" title="Minimum city population to reveal in circles">
-          <option value="50k" selected>&ge; 50k</option>
-          <option value="30k">&ge; 30k (more)</option>
         </select>
         <input id="city-input" type="text" placeholder="Type a city and press Enter" autocomplete="off" autocorrect="on" autocapitalize="none" spellcheck="true" enterkeyhint="go" />
         <button id="reset-btn" title="Clear saved progress and start over">Clear Progress</button>
