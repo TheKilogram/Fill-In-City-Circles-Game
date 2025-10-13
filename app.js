@@ -29,6 +29,7 @@ const resetBtn = document.getElementById('reset-btn');
 const regionSelect = document.getElementById('region');
 const popSelect = document.getElementById('pop-cutoff');
 const topbarEl = document.getElementById('topbar');
+const menuBtn = document.getElementById('menu-btn');
 
 // Keep map positioned under a possibly-wrapping topbar on small screens
 function syncTopbarHeight() {
@@ -50,6 +51,34 @@ window.addEventListener('resize', () => {
 });
 // Initial sync
 syncTopbarHeight();
+
+// Mobile settings menu toggle
+if (menuBtn) {
+  menuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = document.body.classList.toggle('menu-open');
+    menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    syncTopbarHeight();
+  });
+  // Close when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!document.body.classList.contains('menu-open')) return;
+    const withinTopbar = topbarEl && topbarEl.contains(e.target);
+    if (!withinTopbar) {
+      document.body.classList.remove('menu-open');
+      menuBtn.setAttribute('aria-expanded', 'false');
+      syncTopbarHeight();
+    }
+  });
+  // Close on Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.body.classList.contains('menu-open')) {
+      document.body.classList.remove('menu-open');
+      menuBtn.setAttribute('aria-expanded', 'false');
+      syncTopbarHeight();
+    }
+  });
+}
 
 const statCircles = document.getElementById('stat-circles');
 const statDots = document.getElementById('stat-dots');
@@ -592,7 +621,7 @@ async function initRegionAndCutoff() {
   await applyRegion(prefRegion, { keepView: false });
 
   // Load cutoff preference per region
-  let prefCutoff = '50k';
+  let prefCutoff = '30k';
   try {
     const saved = localStorage.getItem(storageKey('uscf_cutoff'));
     if (saved && (saved === '30k' || saved === '50k')) prefCutoff = saved;
@@ -611,12 +640,22 @@ async function initRegionAndCutoff() {
 if (regionSelect) {
   regionSelect.addEventListener('change', async () => {
     await applyRegion(regionSelect.value);
+    if (document.body.classList.contains('menu-open')) {
+      document.body.classList.remove('menu-open');
+      if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
+      syncTopbarHeight();
+    }
   });
 }
 
 if (popSelect) {
   popSelect.addEventListener('change', async () => {
     await setDatasetByCutoff(popSelect.value);
+    if (document.body.classList.contains('menu-open')) {
+      document.body.classList.remove('menu-open');
+      if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
+      syncTopbarHeight();
+    }
   });
 }
 
