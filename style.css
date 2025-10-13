@@ -5,6 +5,7 @@
   --text: #e6eef6;
   --accent: #3fa4ff;
   --danger: #ff5470;
+  --topbar-h: 56px; /* dynamic on mobile via JS */
 }
 
 html, body {
@@ -18,7 +19,7 @@ html, body {
 
 #map {
   position: absolute;
-  top: 56px;
+  top: var(--topbar-h, 56px);
   bottom: 0;
   left: 0;
   right: 0;
@@ -132,4 +133,51 @@ html, body {
   font-weight: 600;
   text-shadow: 0 1px 1px rgba(255,255,255,0.55);
   pointer-events: none;
+}
+
+/* Responsive tweaks */
+@media (max-width: 900px) {
+  #topbar {
+    height: auto; /* allow wrap */
+    padding: 8px 10px;
+    align-items: stretch;
+  }
+  #topbar .controls {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    column-gap: 8px;
+    width: 100%;
+  }
+  #topbar .stats {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    margin-top: 6px;
+  }
+  #topbar input {
+    min-width: 0;
+    flex: 1 1 220px; /* grows to fill row */
+  }
+  #topbar select {
+    flex: 1 1 140px;
+  }
+  #topbar button {
+    flex: 0 0 auto;
+  }
+  /* Hide labels to save space; titles still provide context */
+  #topbar label {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  #topbar select,
+  #topbar input,
+  #topbar button {
+    height: 38px; /* bigger tap targets */
+  }
+  /* Reduce overlay clutter on small screens */
+  #help {
+    display: none;
+  }
 }
