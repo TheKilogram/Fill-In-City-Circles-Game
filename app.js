@@ -28,6 +28,28 @@ const diffSelect = document.getElementById('difficulty');
 const resetBtn = document.getElementById('reset-btn');
 const regionSelect = document.getElementById('region');
 const popSelect = document.getElementById('pop-cutoff');
+const topbarEl = document.getElementById('topbar');
+
+// Keep map positioned under a possibly-wrapping topbar on small screens
+function syncTopbarHeight() {
+  try {
+    const h = topbarEl ? topbarEl.offsetHeight : 56;
+    document.documentElement.style.setProperty('--topbar-h', `${h}px`);
+    // Invalidate Leaflet size after layout changes
+    if (map && typeof map.invalidateSize === 'function') {
+      setTimeout(() => map.invalidateSize({ animate: false }), 0);
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+let __resizeTimer = null;
+window.addEventListener('resize', () => {
+  if (__resizeTimer) clearTimeout(__resizeTimer);
+  __resizeTimer = setTimeout(syncTopbarHeight, 120);
+});
+// Initial sync
+syncTopbarHeight();
 
 const statCircles = document.getElementById('stat-circles');
 const statDots = document.getElementById('stat-dots');
@@ -390,6 +412,8 @@ async function applyRegion(regionId, { keepView = false } = {}) {
     if (!cfg.has50k) popSelect.value = '30k';
     try { localStorage.setItem(storageKey('uscf_cutoff'), popSelect.value); } catch (e) {}
   }
+  // Recompute layout-dependent map top offset
+  syncTopbarHeight();
 }
 
 // Lightweight Levenshtein distance (with early exit threshold)
@@ -579,6 +603,9 @@ async function initRegionAndCutoff() {
 
   // Load any existing progress after datasets and grid ready
   loadProgress();
+
+  // Final layout sync after boot
+  syncTopbarHeight();
 }
 
 if (regionSelect) {
